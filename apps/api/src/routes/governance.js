@@ -27,6 +27,36 @@ const bulkPolicySchema = z.object({
   policies: z.array(policySchema).min(1).max(200)
 });
 
+const policySimulationSchema = z.object({
+  when: z.string().min(1),
+  action: z.string().optional(),
+  context: z.record(z.any()).default({})
+});
+
+function evaluatePolicyCondition(condition, inputContext) {
+  const disallowedPattern = /(constructor|__proto__|prototype|process|global|require|Function|eval|this)/i;
+  if (disallowedPattern.test(condition)) {
+    throw new Error("Condition contains disallowed tokens");
+  }
+
+  const allowedCharsPattern = /^[\w\s().><=!&|+\-*/%,'":\[\]]+$/;
+  if (!allowedCharsPattern.test(condition)) {
+    throw new Error("Condition contains unsupported characters");
+  }
+
+  const context = inputContext && typeof inputContext === "object" ? inputContext : {};
+  const keys = Object.keys(context);
+  for (const key of keys) {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+      throw new Error(`Invalid context key: ${key}`);
+    }
+  }
+
+  const values = keys.map((key) => context[key]);
+  const evaluator = new Function(...keys, `"use strict"; return (${condition});`);
+  return Boolean(evaluator(...values));
+}
+
 export const governanceRouter = Router();
 
 governanceRouter.get("/policies", authorize("read:governance"), async (req, res, next) => {
@@ -210,6 +240,33 @@ governanceRouter.get("/policies/:id/diff", authorize("read:governance"), async (
   } catch (error) {
     if (error.message.includes("not found")) {
       return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+governanceRouter.post("/policies/simulate", authorize("read:governance"), async (req, res, next) => {
+  const parsed = policySimulationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid simulation payload" });
+  }
+
+  try {
+    const { when, context, action } = parsed.data;
+    const matched = evaluatePolicyCondition(when, context);
+
+    res.json({
+      data: {
+        when,
+        context,
+        matched,
+        action: action || null,
+        simulatedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    if (error.message.includes("disallowed") || error.message.includes("unsupported") || error.message.includes("Invalid context key")) {
+      return res.status(400).json({ error: error.message });
     }
     next(error);
   }
