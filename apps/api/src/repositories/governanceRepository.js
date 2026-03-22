@@ -381,6 +381,77 @@ export async function rollbackGovernancePolicy(tenantId, policyId, targetVersion
   });
 }
 
+export async function getPolicyVersionDiff(tenantId, policyId, fromVersionNo, toVersionNo) {
+  const fromVersion = await getGovernancePolicyVersion(tenantId, policyId, fromVersionNo);
+  const toVersion = await getGovernancePolicyVersion(tenantId, policyId, toVersionNo);
+
+  if (!fromVersion || !toVersion) {
+    throw new Error(`One or both versions not found for policy ${policyId}`);
+  }
+
+  const changes = {};
+  const fields = ["name", "enabled", "when", "action"];
+
+  for (const field of fields) {
+    const fromValue = fromVersion[field];
+    const toValue = toVersion[field];
+
+    if (fromValue !== toValue) {
+      changes[field] = {
+        before: fromValue,
+        after: toValue,
+        changed: true
+      };
+    }
+  }
+
+  return {
+    policyId,
+    fromVersion: fromVersionNo,
+    toVersion: toVersionNo,
+    fromVersionData: {
+      name: fromVersion.name,
+      enabled: fromVersion.enabled,
+      when: fromVersion.when,
+      action: fromVersion.action,
+      changedBy: fromVersion.changedBy,
+      changeReason: fromVersion.changeReason,
+      changedAt: fromVersion.changedAt
+    },
+    toVersionData: {
+      name: toVersion.name,
+      enabled: toVersion.enabled,
+      when: toVersion.when,
+      action: toVersion.action,
+      changedBy: toVersion.changedBy,
+      changeReason: toVersion.changeReason,
+      changedAt: toVersion.changedAt
+    },
+    changes,
+    hasChanges: Object.keys(changes).length > 0,
+    summary: generateDiffSummary(changes)
+  };
+}
+
+function generateDiffSummary(changes) {
+  const summaryParts = [];
+
+  if (changes.name) {
+    summaryParts.push(`Policy name updated from "${changes.name.before}" to "${changes.name.after}"`);
+  }
+  if (changes.enabled) {
+    summaryParts.push(`Policy ${changes.enabled.after ? "enabled" : "disabled"}`);
+  }
+  if (changes.when) {
+    summaryParts.push(`Condition changed from "${changes.when.before}" to "${changes.when.after}"`);
+  }
+  if (changes.action) {
+    summaryParts.push(`Action changed from "${changes.action.before}" to "${changes.action.after}"`);
+  }
+
+  return summaryParts.join("; ");
+}
+
 export async function listGovernanceAuditLogs(tenantId, limit = 200) {
   const pool = getPgPool();
   if (pool) {

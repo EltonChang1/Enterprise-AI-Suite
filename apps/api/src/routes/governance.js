@@ -10,7 +10,8 @@ import {
   listGovernanceAuditLogs,
   listGovernancePolicyVersions,
   upsertGovernancePolicy,
-  rollbackGovernancePolicy
+  rollbackGovernancePolicy,
+  getPolicyVersionDiff
 } from "../repositories/governanceRepository.js";
 
 const policySchema = z.object({
@@ -120,6 +121,29 @@ governanceRouter.post("/policies/:id/rollback", authorize("write:workflows"), as
     });
 
     res.status(201).json({ data: { policyId: req.params.id, rolledBackTo: versionNo } });
+  } catch (error) {
+    if (error.message.includes("not found")) {
+      return res.status(404).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
+governanceRouter.get("/policies/:id/diff", authorize("read:governance"), async (req, res, next) => {
+  const fromVersionNo = Number(req.query.fromVersion);
+  const toVersionNo = Number(req.query.toVersion);
+
+  if (!Number.isInteger(fromVersionNo) || fromVersionNo < 1) {
+    return res.status(400).json({ error: "fromVersion must be a positive integer" });
+  }
+
+  if (!Number.isInteger(toVersionNo) || toVersionNo < 1) {
+    return res.status(400).json({ error: "toVersion must be a positive integer" });
+  }
+
+  try {
+    const diff = await getPolicyVersionDiff(req.ctx.tenantId, req.params.id, fromVersionNo, toVersionNo);
+    res.json({ data: diff });
   } catch (error) {
     if (error.message.includes("not found")) {
       return res.status(404).json({ error: error.message });
