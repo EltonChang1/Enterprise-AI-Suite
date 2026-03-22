@@ -79,7 +79,7 @@ Send headers with each request:
 - `POST /api/billing/checkout`
 - `POST /api/billing/webhook`
 - `GET/POST /api/governance/policies`
-- `GET /api/governance/policies/:id/versions`
+- `GET /api/governance/policies/:id/versions` - with pagination & filtering
 - `GET /api/governance/audit`
 - `POST /api/governance/approvals/:id/approve`
 
@@ -130,6 +130,71 @@ Durable tables now include:
 - `governance_audit_logs`
 - `governance_policies`
 - `governance_policy_versions`
+
+### Policy Versions Endpoint
+
+The `GET /api/governance/policies/:id/versions` endpoint supports pagination and filtering for efficient audit query at scale:
+
+**Query Parameters:**
+
+- `limit` (integer, default: 50, max: 500) - Number of versions per page
+- `offset` (integer, default: 0) - Pagination offset
+- `changedBy` (string, optional) - Filter by actor email (e.g., `admin@acme.com`)
+- `startDate` (ISO 8601 string, optional) - Filter versions changed on/after this date
+- `endDate` (ISO 8601 string, optional) - Filter versions changed on/before this date
+
+**Examples:**
+
+```bash
+# Get latest 20 versions
+GET /api/governance/policies/policy-retention/versions?limit=20
+
+# Get second page (offset-based pagination)
+GET /api/governance/policies/policy-retention/versions?limit=50&offset=50
+
+# Filter by actor
+GET /api/governance/policies/policy-retention/versions?changedBy=admin@acme.com&limit=100
+
+# Filter by date range
+GET /api/governance/policies/policy-retention/versions?startDate=2026-03-01T00:00:00Z&endDate=2026-03-22T23:59:59Z
+
+# Combined filters
+GET /api/governance/policies/policy-retention/versions?limit=25&offset=0&changedBy=admin@acme.com&startDate=2026-03-01T00:00:00Z
+```
+
+**Response:**
+
+```json
+{
+  "data": [
+    {
+      "policyId": "policy-retention",
+      "versionNo": 3,
+      "name": "Data Retention",
+      "enabled": true,
+      "when": "eventAgeDays > 400",
+      "action": "archive",
+      "changedBy": "admin@acme.com",
+      "changeReason": "updated retention threshold",
+      "changedAt": "2026-03-22T04:37:19.461Z"
+    },
+    ...
+  ],
+  "pagination": {
+    "total": 25,
+    "limit": 20,
+    "offset": 0,
+    "hasMore": true
+  }
+}
+```
+
+**Notes:**
+
+- Pagination uses offset-based cursor approach; `hasMore` indicates whether additional pages exist
+- Both DB and in-memory fallback support all filters
+- Invalid dates return 400 error with descriptive message
+- Date parameters must be in ISO 8601 format
 
 ## Kubernetes
 

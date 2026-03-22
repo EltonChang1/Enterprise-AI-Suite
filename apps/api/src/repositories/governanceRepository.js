@@ -223,9 +223,50 @@ export async function approveGovernanceRequest(tenantId, approvalId, approvedBy)
   return approval;
 }
 
-export async function listGovernancePolicyVersions(tenantId, policyId, limit = 100) {
+export async function listGovernancePolicyVersions(tenantId, policyId, options = {}) {
+  const limit = Math.min(Math.max(options.limit || 50, 1), 500);
+  const offset = Math.max(options.offset || 0, 0);
+  const changedBy = options.changedBy || null;
+  const startDate = options.startDate || null;
+  const endDate = options.endDate || null;
+
   const pool = getPgPool();
   if (pool) {
+    // Build WHERE clause dynamically
+    const whereConditions = ["tenant_id = $1", "policy_id = $2"];
+    const queryParams = [tenantId, policyId];
+    let paramIndex = 3;
+
+    if (changedBy) {
+      whereConditions.push(`changed_by = $${paramIndex}`);
+      queryParams.push(changedBy);
+      paramIndex++;
+    }
+
+    if (startDate) {
+      whereConditions.push(`changed_at >= $${paramIndex}`);
+      queryParams.push(startDate);
+      paramIndex++;
+    }
+
+    if (endDate) {
+      whereConditions.push(`changed_at <= $${paramIndex}`);
+      queryParams.push(endDate);
+      paramIndex++;
+    }
+
+    const whereClause = whereConditions.join(" AND ");
+    queryParams.push(limit);
+    queryParams.push(offset);
+
+    // Get total count
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total FROM governance_policy_versions WHERE ${whereClause}`,
+      queryParams.slice(0, paramIndex - 1)
+    );
+    const total = Number(countResult.rows[0]?.total || 0);
+
+    // Get paginated results
     const result = await pool.query(
       `SELECT policy_id AS "policyId",
               version_no AS "versionNo",
@@ -237,19 +278,56 @@ export async function listGovernancePolicyVersions(tenantId, policyId, limit = 1
               change_reason AS "changeReason",
               changed_at AS "changedAt"
        FROM governance_policy_versions
-       WHERE tenant_id = $1 AND policy_id = $2
+       WHERE ${whereClause}
        ORDER BY version_no DESC
-       LIMIT $3`,
-      [tenantId, policyId, limit]
+       LIMIT $${paramIndex}
+       OFFSET $${paramIndex + 1}`,
+      queryParams
     );
-    return result.rows;
+
+    return {
+      data: result.rows,
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total
+      }
+    };
   }
 
+  // In-memory fallback with filtering
   const tenant = getTenantState(tenantId);
-  return tenant.governance.policyVersions
-    .filter((item) => item.policyId === policyId)
-    .sort((a, b) => b.versionNo - a.versionNo)
-    .slice(0, limit);
+  let items = tenant.governance.policyVersions.filter((item) => item.policyId === policyId);
+
+  if (changedBy) {
+    items = items.filter((item) => item.changedBy === changedBy);
+  }
+
+  if (startDate) {
+    const startDateObj = new Date(startDate);
+    items = items.filter((item) => new Date(item.changedAt) >= startDateObj);
+  }
+
+  if (endDate) {
+    const endDateObj = new Date(endDate);
+    items = items.filter((item) => new Date(item.changedAt) <= endDateObj);
+  }
+
+  items.sort((a, b) => b.versionNo - a.versionNo);
+
+  const total = items.length;
+  const paginatedItems = items.slice(offset, offset + limit);
+
+  return {
+    data: paginatedItems,
+    pagination: {
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total
+    }
+  };
 }
 
 export async function listGovernanceAuditLogs(tenantId, limit = 200) {

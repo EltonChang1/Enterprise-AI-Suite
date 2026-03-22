@@ -59,8 +59,42 @@ governanceRouter.post("/policies", authorize("write:workflows"), async (req, res
 
 governanceRouter.get("/policies/:id/versions", authorize("read:governance"), async (req, res, next) => {
   try {
-    const versions = await listGovernancePolicyVersions(req.ctx.tenantId, req.params.id, 100);
-    res.json({ data: versions });
+    // Parse and validate query parameters
+    const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit, 10), 1), 500) : 50;
+    const offset = req.query.offset ? Math.max(parseInt(req.query.offset, 10), 0) : 0;
+    const changedBy = req.query.changedBy || null;
+
+    // Validate date parameters
+    let startDate = null;
+    let endDate = null;
+
+    if (req.query.startDate) {
+      const parsed = new Date(req.query.startDate);
+      if (!isNaN(parsed.getTime())) {
+        startDate = parsed;
+      } else {
+        return res.status(400).json({ error: "Invalid startDate format (use ISO 8601)" });
+      }
+    }
+
+    if (req.query.endDate) {
+      const parsed = new Date(req.query.endDate);
+      if (!isNaN(parsed.getTime())) {
+        endDate = parsed;
+      } else {
+        return res.status(400).json({ error: "Invalid endDate format (use ISO 8601)" });
+      }
+    }
+
+    const result = await listGovernancePolicyVersions(req.ctx.tenantId, req.params.id, {
+      limit,
+      offset,
+      changedBy,
+      startDate,
+      endDate
+    });
+
+    res.json(result);
   } catch (error) {
     next(error);
   }
