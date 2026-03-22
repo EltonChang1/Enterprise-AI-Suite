@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web
+        run: npm run build -w apps/web
+
+      - name: API syntax checks
+        run: |
+          node --check apps/api/src/index.js
+          node --check apps/api/src/routes/workflows.js
+          node --check apps/api/src/routes/agents.js
+          node --check apps/api/src/routes/billing.js
+
+      - name: Worker syntax check
+        run: node --check apps/worker/src/worker.js

@@ -1,0 +1,103 @@
+name: Build Publish Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  containerize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set metadata
+        id: meta
+        run: |
+          echo "sha_tag=${GITHUB_SHA::12}" >> $GITHUB_OUTPUT
+          echo "owner_lower=$(echo $IMAGE_OWNER | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-api:${{ steps.meta.outputs.sha_tag }}
+            ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-api:latest
+
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-worker:${{ steps.meta.outputs.sha_tag }}
+            ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-worker:latest
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-web:${{ steps.meta.outputs.sha_tag }}
+            ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-web:latest
+
+  deploy-k8s:
+    runs-on: ubuntu-latest
+    needs: [containerize]
+    if: ${{ secrets.KUBE_CONFIG_DATA != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set metadata
+        id: meta
+        run: |
+          echo "sha_tag=${GITHUB_SHA::12}" >> $GITHUB_OUTPUT
+          echo "owner_lower=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > ~/.kube/config
+
+      - name: Apply base manifests
+        run: |
+          kubectl apply -f deploy/k8s/namespace.yaml
+          kubectl apply -f deploy/k8s/configmap.yaml
+          kubectl apply -f deploy/k8s/api.yaml
+          kubectl apply -f deploy/k8s/worker.yaml
+          kubectl apply -f deploy/k8s/web.yaml
+
+      - name: Roll out images
+        run: |
+          kubectl -n enterprise-ai-suite set image deployment/suite-api api=ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-api:${{ steps.meta.outputs.sha_tag }}
+          kubectl -n enterprise-ai-suite set image deployment/suite-worker worker=ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-worker:${{ steps.meta.outputs.sha_tag }}
+          kubectl -n enterprise-ai-suite set image deployment/suite-web web=ghcr.io/${{ steps.meta.outputs.owner_lower }}/enterprise-ai-suite-web:${{ steps.meta.outputs.sha_tag }}
+          kubectl -n enterprise-ai-suite rollout status deployment/suite-api --timeout=180s
+          kubectl -n enterprise-ai-suite rollout status deployment/suite-worker --timeout=180s
+          kubectl -n enterprise-ai-suite rollout status deployment/suite-web --timeout=180s

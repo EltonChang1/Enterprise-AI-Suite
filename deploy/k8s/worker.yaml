@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suite-worker
+  namespace: enterprise-ai-suite
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: suite-worker
+  template:
+    metadata:
+      labels:
+        app: suite-worker
+    spec:
+      containers:
+        - name: worker
+          image: your-registry/enterprise-ai-suite-worker:latest
+          envFrom:
+            - configMapRef:
+                name: suite-config
+            - secretRef:
+                name: suite-secrets

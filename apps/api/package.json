@@ -1,0 +1,29 @@
+{
+  "name": "@enterprise-suite/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "migrate:latest": "knex migrate:latest --knexfile ./knexfile.cjs",
+    "migrate:rollback": "knex migrate:rollback --knexfile ./knexfile.cjs"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.54.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.54.0",
+    "@opentelemetry/sdk-node": "^0.54.0",
+    "bullmq": "^5.34.10",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2",
+    "knex": "^3.1.0",
+    "pg": "^8.13.1",
+    "stripe": "^17.6.0",
+    "uuid": "^11.0.3",
+    "zod": "^3.23.8"
+  }
+}
