@@ -330,6 +330,57 @@ export async function listGovernancePolicyVersions(tenantId, policyId, options =
   };
 }
 
+export async function getGovernancePolicyVersion(tenantId, policyId, versionNo) {
+  const pool = getPgPool();
+  if (pool) {
+    const result = await pool.query(
+      `SELECT policy_id AS "policyId",
+              version_no AS "versionNo",
+              name,
+              enabled,
+              condition_expr AS "when",
+              action,
+              changed_by AS "changedBy",
+              change_reason AS "changeReason",
+              changed_at AS "changedAt"
+       FROM governance_policy_versions
+       WHERE tenant_id = $1 AND policy_id = $2 AND version_no = $3`,
+      [tenantId, policyId, versionNo]
+    );
+    return result.rows[0] || null;
+  }
+
+  const tenant = getTenantState(tenantId);
+  const version = tenant.governance.policyVersions.find(
+    (v) => v.policyId === policyId && v.versionNo === versionNo
+  );
+  return version || null;
+}
+
+export async function rollbackGovernancePolicy(tenantId, policyId, targetVersionNo, actor) {
+  // Get the target version
+  const targetVersion = await getGovernancePolicyVersion(tenantId, policyId, targetVersionNo);
+  if (!targetVersion) {
+    throw new Error(`Version ${targetVersionNo} not found for policy ${policyId}`);
+  }
+
+  // Create a new version using the target version's data
+  const policy = {
+    id: policyId,
+    name: targetVersion.name,
+    enabled: targetVersion.enabled,
+    when: targetVersion.when,
+    action: targetVersion.action
+  };
+
+  const rollbackReason = `Rolled back to version ${targetVersionNo}: ${targetVersion.name}`;
+
+  return await upsertGovernancePolicy(tenantId, policy, {
+    changedBy: actor,
+    changeReason: rollbackReason
+  });
+}
+
 export async function listGovernanceAuditLogs(tenantId, limit = 200) {
   const pool = getPgPool();
   if (pool) {
