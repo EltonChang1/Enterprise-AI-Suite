@@ -115,6 +115,7 @@ Current migrations:
 - `202603220001_initial_enterprise_schema.js`
 - `202603220002_agent_tasks_billing_usage_events.js`
 - `202603220003_governance_approvals_audit_logs.js`
+- `202603220004_governance_policies.js`
 
 Durable tables now include:
 
@@ -125,6 +126,7 @@ Durable tables now include:
 - `crm_contacts`
 - `governance_approvals`
 - `governance_audit_logs`
+- `governance_policies`
 
 ## Kubernetes
 

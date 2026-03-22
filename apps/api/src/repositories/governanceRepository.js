@@ -1,6 +1,91 @@
 import { getPgPool } from "../lib/postgres.js";
 import { getTenantState } from "../store.js";
 
+const defaultPolicies = [
+  {
+    id: "policy-human-approval-high-risk",
+    name: "Human approval for high-risk agent tasks",
+    enabled: true,
+    when: "riskScore >= 0.7",
+    action: "require_approval"
+  }
+];
+
+export async function listGovernancePolicies(tenantId) {
+  const pool = getPgPool();
+  if (pool) {
+    const result = await pool.query(
+      `SELECT policy_id AS id,
+              name,
+              enabled,
+              condition_expr AS "when",
+              action,
+              created_at AS "createdAt",
+              updated_at AS "updatedAt"
+       FROM governance_policies
+       WHERE tenant_id = $1
+       ORDER BY updated_at DESC`,
+      [tenantId]
+    );
+
+    if (result.rows.length > 0) {
+      return result.rows;
+    }
+
+    for (const policy of defaultPolicies) {
+      await upsertGovernancePolicy(tenantId, policy);
+    }
+
+    const seeded = await pool.query(
+      `SELECT policy_id AS id,
+              name,
+              enabled,
+              condition_expr AS "when",
+              action,
+              created_at AS "createdAt",
+              updated_at AS "updatedAt"
+       FROM governance_policies
+       WHERE tenant_id = $1
+       ORDER BY updated_at DESC`,
+      [tenantId]
+    );
+    return seeded.rows;
+  }
+
+  const tenant = getTenantState(tenantId);
+  return tenant.governance.policies;
+}
+
+export async function upsertGovernancePolicy(tenantId, policy) {
+  const pool = getPgPool();
+  if (pool) {
+    await pool.query(
+      `INSERT INTO governance_policies
+         (tenant_id, policy_id, name, enabled, condition_expr, action, created_at, updated_at)
+       VALUES
+         ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+       ON CONFLICT (tenant_id, policy_id)
+       DO UPDATE SET
+         name = EXCLUDED.name,
+         enabled = EXCLUDED.enabled,
+         condition_expr = EXCLUDED.condition_expr,
+         action = EXCLUDED.action,
+         updated_at = NOW()`,
+      [tenantId, policy.id, policy.name, policy.enabled, policy.when, policy.action]
+    );
+    return policy;
+  }
+
+  const tenant = getTenantState(tenantId);
+  const existingIndex = tenant.governance.policies.findIndex((item) => item.id === policy.id);
+  if (existingIndex >= 0) {
+    tenant.governance.policies[existingIndex] = policy;
+  } else {
+    tenant.governance.policies.unshift(policy);
+  }
+  return policy;
+}
+
 export async function listGovernanceApprovals(tenantId) {
   const pool = getPgPool();
   if (pool) {

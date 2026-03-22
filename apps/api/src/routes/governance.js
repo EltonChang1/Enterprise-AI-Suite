@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
-import { addAuditEntry, getTenantState } from "../store.js";
+import { addAuditEntry } from "../store.js";
 import { authorize } from "../middleware/context.js";
 import { markAgentTaskApproved } from "../repositories/agentRepository.js";
 import {
   approveGovernanceRequest,
+  listGovernancePolicies,
   listGovernanceApprovals,
-  listGovernanceAuditLogs
+  listGovernanceAuditLogs,
+  upsertGovernancePolicy
 } from "../repositories/governanceRepository.js";
 
 const policySchema = z.object({
@@ -19,32 +21,34 @@ const policySchema = z.object({
 
 export const governanceRouter = Router();
 
-governanceRouter.get("/policies", authorize("read:governance"), (req, res) => {
-  const tenant = getTenantState(req.ctx.tenantId);
-  res.json({ data: tenant.governance.policies });
+governanceRouter.get("/policies", authorize("read:governance"), async (req, res, next) => {
+  try {
+    const policies = await listGovernancePolicies(req.ctx.tenantId);
+    res.json({ data: policies });
+  } catch (error) {
+    next(error);
+  }
 });
 
-governanceRouter.post("/policies", authorize("write:workflows"), (req, res) => {
+governanceRouter.post("/policies", authorize("write:workflows"), async (req, res, next) => {
   const parsed = policySchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid policy payload" });
   }
-  const tenant = getTenantState(req.ctx.tenantId);
-  const existingIndex = tenant.governance.policies.findIndex((policy) => policy.id === parsed.data.id);
-  if (existingIndex >= 0) {
-    tenant.governance.policies[existingIndex] = parsed.data;
-  } else {
-    tenant.governance.policies.unshift(parsed.data);
+  try {
+    await upsertGovernancePolicy(req.ctx.tenantId, parsed.data);
+    addAuditEntry(req.ctx.tenantId, {
+      actorId: req.ctx.userId,
+      actorRole: req.ctx.userRole,
+      action: "UPSERT_POLICY",
+      module: "governance",
+      resourceId: parsed.data.id,
+      payload: { name: parsed.data.name, enabled: parsed.data.enabled }
+    });
+    res.status(201).json({ data: parsed.data });
+  } catch (error) {
+    next(error);
   }
-  addAuditEntry(req.ctx.tenantId, {
-    actorId: req.ctx.userId,
-    actorRole: req.ctx.userRole,
-    action: "UPSERT_POLICY",
-    module: "governance",
-    resourceId: parsed.data.id,
-    payload: { name: parsed.data.name, enabled: parsed.data.enabled }
-  });
-  res.status(201).json({ data: parsed.data });
 });
 
 governanceRouter.get("/audit", authorize("read:governance"), async (req, res, next) => {

@@ -6,7 +6,7 @@ import { listContacts } from "../repositories/contactRepository.js";
 import { listWorkflowRuns } from "../repositories/workflowRepository.js";
 import { listAgentTasks } from "../repositories/agentRepository.js";
 import { listBillingUsageEvents } from "../repositories/billingRepository.js";
-import { listGovernanceApprovals, listGovernanceAuditLogs } from "../repositories/governanceRepository.js";
+import { listGovernanceApprovals, listGovernanceAuditLogs, listGovernancePolicies } from "../repositories/governanceRepository.js";
 
 export const analyticsRouter = Router();
 
@@ -20,13 +20,14 @@ analyticsRouter.get("/dashboard", authorize("read:analytics"), async (req, res, 
 
     const tenant = getTenantState(req.ctx.tenantId);
 
-    const [contacts, workflows, tasks, usageEvents, approvals, auditLogs] = await Promise.all([
+    const [contacts, workflows, tasks, usageEvents, approvals, auditLogs, policies] = await Promise.all([
       listContacts(req.ctx.tenantId),
       listWorkflowRuns(req.ctx.tenantId),
       listAgentTasks(req.ctx.tenantId),
       listBillingUsageEvents(req.ctx.tenantId),
       listGovernanceApprovals(req.ctx.tenantId),
-      listGovernanceAuditLogs(req.ctx.tenantId, 500)
+      listGovernanceAuditLogs(req.ctx.tenantId, 500),
+      listGovernancePolicies(req.ctx.tenantId)
     ]);
 
     const stageCounts = contacts.reduce(
@@ -62,7 +63,7 @@ analyticsRouter.get("/dashboard", authorize("read:analytics"), async (req, res, 
       },
       governance: {
         pendingApprovals: approvals.filter((request) => request.status === "pending").length,
-        policyCount: tenant.governance.policies.length,
+        policyCount: policies.length,
         auditEvents: auditLogs.length
       }
     };
