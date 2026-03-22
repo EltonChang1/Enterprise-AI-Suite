@@ -110,6 +110,19 @@ npm run migrate:rollback -w apps/api
 
 With `RUN_MIGRATIONS_ON_START=true`, the API automatically applies pending migrations during startup.
 
+Current migrations:
+
+- `202603220001_initial_enterprise_schema.js`
+- `202603220002_agent_tasks_billing_usage_events.js`
+
+Durable tables now include:
+
+- `agent_tasks`
+- `billing_usage_events`
+- `workflow_definitions`
+- `workflow_runs`
+- `crm_contacts`
+
 ## Kubernetes
 
 Base manifests are in `deploy/k8s`:

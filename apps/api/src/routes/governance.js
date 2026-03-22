@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { addAuditEntry, getTenantState } from "../store.js";
 import { authorize } from "../middleware/context.js";
+import { markAgentTaskApproved } from "../repositories/agentRepository.js";
 
 const policySchema = z.object({
   id: z.string().min(3),
@@ -51,7 +52,7 @@ governanceRouter.get("/approvals", authorize("read:governance"), (req, res) => {
   res.json({ data: tenant.governance.approvals });
 });
 
-governanceRouter.post("/approvals/:id/approve", authorize("approve:governance"), (req, res) => {
+governanceRouter.post("/approvals/:id/approve", authorize("approve:governance"), async (req, res, next) => {
   const tenant = getTenantState(req.ctx.tenantId);
   const approval = tenant.governance.approvals.find((item) => item.id === req.params.id);
   if (!approval) {
@@ -62,19 +63,27 @@ governanceRouter.post("/approvals/:id/approve", authorize("approve:governance"),
   approval.approvedBy = req.ctx.userId;
 
   const task = tenant.agents.tasks.find((item) => item.id === approval.taskId);
-  if (task && task.status === "pending_approval") {
-    task.status = "completed";
-    task.outcome = `Approved execution: ${task.objective}`;
+  const approvedOutcome = `Approved execution: ${task?.objective || "task"}`;
+
+  try {
+    await markAgentTaskApproved(req.ctx.tenantId, approval.taskId, approvedOutcome);
+
+    if (task && task.status === "pending_approval") {
+      task.status = "completed";
+      task.outcome = approvedOutcome;
+    }
+
+    addAuditEntry(req.ctx.tenantId, {
+      actorId: req.ctx.userId,
+      actorRole: req.ctx.userRole,
+      action: "APPROVE_REQUEST",
+      module: "governance",
+      resourceId: approval.id,
+      payload: { taskId: approval.taskId }
+    });
+
+    res.json({ data: approval });
+  } catch (error) {
+    next(error);
   }
-
-  addAuditEntry(req.ctx.tenantId, {
-    actorId: req.ctx.userId,
-    actorRole: req.ctx.userRole,
-    action: "APPROVE_REQUEST",
-    module: "governance",
-    resourceId: approval.id,
-    payload: { taskId: approval.taskId }
-  });
-
-  res.json({ data: approval });
 });

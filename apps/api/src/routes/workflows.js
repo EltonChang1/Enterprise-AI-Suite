@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
-import { addAuditEntry, getTenantState } from "../store.js";
+import { addAuditEntry } from "../store.js";
 import { authorize } from "../middleware/context.js";
 import { enqueueJob } from "../lib/queue.js";
 import {
@@ -11,6 +11,7 @@ import {
   listWorkflowDefinitions,
   listWorkflowRuns
 } from "../repositories/workflowRepository.js";
+import { createBillingUsageEvent } from "../repositories/billingRepository.js";
 
 const workflowSchema = z.object({
   name: z.string().min(3),
@@ -82,8 +83,7 @@ workflowsRouter.post("/:id/execute", authorize("write:workflows"), async (req, r
 
     await createWorkflowRun(req.ctx.tenantId, run);
 
-    const tenant = getTenantState(req.ctx.tenantId);
-    tenant.billing.usageEvents.unshift({
+    await createBillingUsageEvent(req.ctx.tenantId, {
       id: uuidv4(),
       category: "workflow_run",
       units: definition.steps.length,

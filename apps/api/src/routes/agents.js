@@ -4,6 +4,8 @@ import { z } from "zod";
 import { addAuditEntry, getTenantState } from "../store.js";
 import { authorize } from "../middleware/context.js";
 import { enqueueJob } from "../lib/queue.js";
+import { createAgentTask, listAgentTasks } from "../repositories/agentRepository.js";
+import { createBillingUsageEvent } from "../repositories/billingRepository.js";
 
 const taskSchema = z.object({
   objective: z.string().min(4),
@@ -13,9 +15,13 @@ const taskSchema = z.object({
 
 export const agentsRouter = Router();
 
-agentsRouter.get("/tasks", authorize("read:agents"), (req, res) => {
-  const tenant = getTenantState(req.ctx.tenantId);
-  res.json({ data: tenant.agents.tasks });
+agentsRouter.get("/tasks", authorize("read:agents"), async (req, res, next) => {
+  try {
+    const tasks = await listAgentTasks(req.ctx.tenantId);
+    res.json({ data: tasks });
+  } catch (error) {
+    next(error);
+  }
 });
 
 agentsRouter.post("/tasks", authorize("write:agents"), async (req, res, next) => {
@@ -35,8 +41,6 @@ agentsRouter.post("/tasks", authorize("write:agents"), async (req, res, next) =>
     createdAt: new Date().toISOString()
   };
 
-  tenant.agents.tasks.unshift(task);
-
   if (requiresApproval) {
     tenant.governance.approvals.unshift({
       id: uuidv4(),
@@ -49,11 +53,20 @@ agentsRouter.post("/tasks", authorize("write:agents"), async (req, res, next) =>
   }
 
   try {
+    await createAgentTask(req.ctx.tenantId, task);
+
     await enqueueJob("agent-task", {
       tenantId: req.ctx.tenantId,
       taskId: task.id,
       objective: task.objective,
       requiresApproval
+    });
+
+    await createBillingUsageEvent(req.ctx.tenantId, {
+      id: uuidv4(),
+      category: "agent_task",
+      units: 1,
+      recordedAt: new Date().toISOString()
     });
 
     addAuditEntry(req.ctx.tenantId, {

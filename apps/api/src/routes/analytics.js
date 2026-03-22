@@ -2,6 +2,10 @@ import { Router } from "express";
 import { getTenantState } from "../store.js";
 import { authorize } from "../middleware/context.js";
 import { cacheGetJson, cacheSetJson } from "../lib/redis.js";
+import { listContacts } from "../repositories/contactRepository.js";
+import { listWorkflowRuns } from "../repositories/workflowRepository.js";
+import { listAgentTasks } from "../repositories/agentRepository.js";
+import { listBillingUsageEvents } from "../repositories/billingRepository.js";
 
 export const analyticsRouter = Router();
 
@@ -13,29 +17,31 @@ analyticsRouter.get("/dashboard", authorize("read:analytics"), async (req, res, 
       return res.json({ data: cached, source: "redis-cache" });
     }
 
-  const tenant = getTenantState(req.ctx.tenantId);
+    const tenant = getTenantState(req.ctx.tenantId);
 
-  const contacts = tenant.crm.contacts;
-  const workflows = tenant.workflows.runs;
-  const tasks = tenant.agents.tasks;
-  const usageEvents = tenant.billing.usageEvents;
+    const [contacts, workflows, tasks, usageEvents] = await Promise.all([
+      listContacts(req.ctx.tenantId),
+      listWorkflowRuns(req.ctx.tenantId),
+      listAgentTasks(req.ctx.tenantId),
+      listBillingUsageEvents(req.ctx.tenantId)
+    ]);
 
-  const stageCounts = contacts.reduce(
-    (acc, contact) => {
-      acc[contact.stage] = (acc[contact.stage] || 0) + 1;
+    const stageCounts = contacts.reduce(
+      (acc, contact) => {
+        acc[contact.stage] = (acc[contact.stage] || 0) + 1;
+        return acc;
+      },
+      { lead: 0, qualified: 0, proposal: 0, customer: 0 }
+    );
+
+    const completionRate = tasks.length
+      ? Number((tasks.filter((task) => task.status === "completed").length / tasks.length).toFixed(2))
+      : 1;
+
+    const usageByCategory = usageEvents.reduce((acc, event) => {
+      acc[event.category] = (acc[event.category] || 0) + event.units;
       return acc;
-    },
-    { lead: 0, qualified: 0, proposal: 0, customer: 0 }
-  );
-
-  const completionRate = tasks.length
-    ? Number((tasks.filter((task) => task.status === "completed").length / tasks.length).toFixed(2))
-    : 1;
-
-  const usageByCategory = usageEvents.reduce((acc, event) => {
-    acc[event.category] = (acc[event.category] || 0) + event.units;
-    return acc;
-  }, {});
+    }, {});
 
     const payload = {
       tenantId: req.ctx.tenantId,
