@@ -32,5 +32,8 @@ export const config = {
     enabled: process.env.OTEL_ENABLED !== "false",
     serviceName: process.env.OTEL_SERVICE_NAME || "enterprise-ai-suite-api",
     endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces"
+  },
+  governance: {
+    auditRetentionDays: Number(process.env.GOVERNANCE_AUDIT_RETENTION_DAYS || 90)
   }
 };

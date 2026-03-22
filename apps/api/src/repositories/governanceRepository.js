@@ -1,5 +1,6 @@
 import { getPgPool } from "../lib/postgres.js";
 import { getTenantState } from "../store.js";
+import { config } from "../config.js";
 
 const defaultPolicies = [
   {
@@ -452,9 +453,55 @@ function generateDiffSummary(changes) {
   return summaryParts.join("; ");
 }
 
-export async function listGovernanceAuditLogs(tenantId, limit = 200) {
+export async function listGovernanceAuditLogs(tenantId, options = {}) {
+  const normalizedOptions =
+    typeof options === "number"
+      ? { limit: options }
+      : options;
+
+  const limit = Math.min(Math.max(Number(normalizedOptions.limit || 200), 1), 1000);
+  const actorId = normalizedOptions.actorId || null;
+  const action = normalizedOptions.action || null;
+  const startDate = normalizedOptions.startDate || null;
+  const endDate = normalizedOptions.endDate || null;
+  const retentionDays = Math.max(
+    Number(normalizedOptions.retentionDays || config.governance.auditRetentionDays || 90),
+    1
+  );
+
   const pool = getPgPool();
   if (pool) {
+    const whereConditions = ["tenant_id = $1", "at >= NOW() - ($2::int * INTERVAL '1 day')"];
+    const queryParams = [tenantId, retentionDays];
+    let paramIndex = 3;
+
+    if (actorId) {
+      whereConditions.push(`actor_id = $${paramIndex}`);
+      queryParams.push(actorId);
+      paramIndex++;
+    }
+
+    if (action) {
+      whereConditions.push(`action = $${paramIndex}`);
+      queryParams.push(action);
+      paramIndex++;
+    }
+
+    if (startDate) {
+      whereConditions.push(`at >= $${paramIndex}`);
+      queryParams.push(startDate);
+      paramIndex++;
+    }
+
+    if (endDate) {
+      whereConditions.push(`at <= $${paramIndex}`);
+      queryParams.push(endDate);
+      paramIndex++;
+    }
+
+    const whereClause = whereConditions.join(" AND ");
+    queryParams.push(limit);
+
     const result = await pool.query(
       `SELECT id,
               at,
@@ -465,14 +512,36 @@ export async function listGovernanceAuditLogs(tenantId, limit = 200) {
               resource_id AS "resourceId",
               payload
        FROM governance_audit_logs
-       WHERE tenant_id = $1
+       WHERE ${whereClause}
        ORDER BY at DESC
-       LIMIT $2`,
-      [tenantId, limit]
+       LIMIT $${paramIndex}`,
+      queryParams
     );
     return result.rows;
   }
 
   const tenant = getTenantState(tenantId);
-  return tenant.governance.auditLog.slice(0, limit);
+  const retentionCutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  let logs = tenant.governance.auditLog.filter((item) => new Date(item.at) >= retentionCutoff);
+
+  if (actorId) {
+    logs = logs.filter((item) => item.actorId === actorId);
+  }
+
+  if (action) {
+    logs = logs.filter((item) => item.action === action);
+  }
+
+  if (startDate) {
+    const start = new Date(startDate);
+    logs = logs.filter((item) => new Date(item.at) >= start);
+  }
+
+  if (endDate) {
+    const end = new Date(endDate);
+    logs = logs.filter((item) => new Date(item.at) <= end);
+  }
+
+  return logs.slice(0, limit);
 }

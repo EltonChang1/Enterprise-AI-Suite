@@ -154,7 +154,42 @@ governanceRouter.get("/policies/:id/diff", authorize("read:governance"), async (
 
 governanceRouter.get("/audit", authorize("read:governance"), async (req, res, next) => {
   try {
-    const logs = await listGovernanceAuditLogs(req.ctx.tenantId, 200);
+    const limit = req.query.limit ? Math.min(Math.max(Number(req.query.limit), 1), 1000) : 200;
+    const actorId = req.query.actorId || null;
+    const action = req.query.action || null;
+    const retentionDays = req.query.retentionDays
+      ? Math.max(Number(req.query.retentionDays), 1)
+      : undefined;
+
+    let startDate = null;
+    let endDate = null;
+
+    if (req.query.startDate) {
+      const parsed = new Date(req.query.startDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        startDate = parsed;
+      } else {
+        return res.status(400).json({ error: "Invalid startDate format (use ISO 8601)" });
+      }
+    }
+
+    if (req.query.endDate) {
+      const parsed = new Date(req.query.endDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        endDate = parsed;
+      } else {
+        return res.status(400).json({ error: "Invalid endDate format (use ISO 8601)" });
+      }
+    }
+
+    const logs = await listGovernanceAuditLogs(req.ctx.tenantId, {
+      limit,
+      actorId,
+      action,
+      startDate,
+      endDate,
+      retentionDays
+    });
     res.json({ data: logs });
   } catch (error) {
     next(error);
