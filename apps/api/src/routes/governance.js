@@ -23,6 +23,10 @@ const policySchema = z.object({
   changeReason: z.string().max(300).optional()
 });
 
+const bulkPolicySchema = z.object({
+  policies: z.array(policySchema).min(1).max(200)
+});
+
 export const governanceRouter = Router();
 
 governanceRouter.get("/policies", authorize("read:governance"), async (req, res, next) => {
@@ -54,6 +58,65 @@ governanceRouter.post("/policies", authorize("write:workflows"), async (req, res
       payload: { name: policy.name, enabled: policy.enabled, changeReason: changeReason || null }
     });
     res.status(201).json({ data: policy });
+  } catch (error) {
+    next(error);
+  }
+});
+
+governanceRouter.post("/policies/bulk-upsert", authorize("write:workflows"), async (req, res, next) => {
+  const parsed = bulkPolicySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid bulk policy payload" });
+  }
+
+  try {
+    const results = [];
+
+    for (const rawPolicy of parsed.data.policies) {
+      const { changeReason, ...policy } = rawPolicy;
+      try {
+        await upsertGovernancePolicy(req.ctx.tenantId, policy, {
+          changedBy: req.ctx.userId,
+          changeReason
+        });
+
+        addAuditEntry(req.ctx.tenantId, {
+          actorId: req.ctx.userId,
+          actorRole: req.ctx.userRole,
+          action: "UPSERT_POLICY_BULK",
+          module: "governance",
+          resourceId: policy.id,
+          payload: {
+            name: policy.name,
+            enabled: policy.enabled,
+            changeReason: changeReason || null
+          }
+        });
+
+        results.push({
+          policyId: policy.id,
+          status: "success"
+        });
+      } catch (error) {
+        results.push({
+          policyId: policy.id,
+          status: "failed",
+          error: error.message
+        });
+      }
+    }
+
+    const successCount = results.filter((item) => item.status === "success").length;
+    const failedCount = results.length - successCount;
+
+    res.status(201).json({
+      data: {
+        total: results.length,
+        successCount,
+        failedCount,
+        results
+      }
+    });
   } catch (error) {
     next(error);
   }
