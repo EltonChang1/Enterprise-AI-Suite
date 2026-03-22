@@ -29,6 +29,7 @@ const baseTenantState = () => ({
         action: "require_approval"
       }
     ],
+    policyVersions: [],
     approvals: [],
     auditLog: []
   }

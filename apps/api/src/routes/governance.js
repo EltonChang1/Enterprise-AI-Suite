@@ -8,6 +8,7 @@ import {
   listGovernancePolicies,
   listGovernanceApprovals,
   listGovernanceAuditLogs,
+  listGovernancePolicyVersions,
   upsertGovernancePolicy
 } from "../repositories/governanceRepository.js";
 
@@ -16,7 +17,8 @@ const policySchema = z.object({
   name: z.string().min(3),
   enabled: z.boolean(),
   when: z.string().min(3),
-  action: z.string().min(3)
+  action: z.string().min(3),
+  changeReason: z.string().max(300).optional()
 });
 
 export const governanceRouter = Router();
@@ -36,16 +38,29 @@ governanceRouter.post("/policies", authorize("write:workflows"), async (req, res
     return res.status(400).json({ error: "Invalid policy payload" });
   }
   try {
-    await upsertGovernancePolicy(req.ctx.tenantId, parsed.data);
+    const { changeReason, ...policy } = parsed.data;
+    await upsertGovernancePolicy(req.ctx.tenantId, policy, {
+      changedBy: req.ctx.userId,
+      changeReason
+    });
     addAuditEntry(req.ctx.tenantId, {
       actorId: req.ctx.userId,
       actorRole: req.ctx.userRole,
       action: "UPSERT_POLICY",
       module: "governance",
-      resourceId: parsed.data.id,
-      payload: { name: parsed.data.name, enabled: parsed.data.enabled }
+      resourceId: policy.id,
+      payload: { name: policy.name, enabled: policy.enabled, changeReason: changeReason || null }
     });
-    res.status(201).json({ data: parsed.data });
+    res.status(201).json({ data: policy });
+  } catch (error) {
+    next(error);
+  }
+});
+
+governanceRouter.get("/policies/:id/versions", authorize("read:governance"), async (req, res, next) => {
+  try {
+    const versions = await listGovernancePolicyVersions(req.ctx.tenantId, req.params.id, 100);
+    res.json({ data: versions });
   } catch (error) {
     next(error);
   }

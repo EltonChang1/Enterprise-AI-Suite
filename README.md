@@ -79,6 +79,7 @@ Send headers with each request:
 - `POST /api/billing/checkout`
 - `POST /api/billing/webhook`
 - `GET/POST /api/governance/policies`
+- `GET /api/governance/policies/:id/versions`
 - `GET /api/governance/audit`
 - `POST /api/governance/approvals/:id/approve`
 
@@ -116,6 +117,7 @@ Current migrations:
 - `202603220002_agent_tasks_billing_usage_events.js`
 - `202603220003_governance_approvals_audit_logs.js`
 - `202603220004_governance_policies.js`
+- `202603220005_governance_policy_versions.js`
 
 Durable tables now include:
 
@@ -127,6 +129,7 @@ Durable tables now include:
 - `governance_approvals`
 - `governance_audit_logs`
 - `governance_policies`
+- `governance_policy_versions`
 
 ## Kubernetes
 
