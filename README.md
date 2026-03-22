@@ -367,6 +367,44 @@ curl -X POST "http://localhost:4100/api/governance/policies/simulate" \
 }
 ```
 
+### Quick Smoke Test
+
+Run the following block to quickly validate the 4 governance APIs (`bulk-upsert`, `diff`, `rollback`, `simulate`) end-to-end on local API (`http://localhost:4100`):
+
+```bash
+bash -lc '
+set -euo pipefail
+BASE_URL="http://localhost:4100"
+TENANT_ID="demo-enterprise"
+POLICY_ID="policy-smoke-quick"
+
+TOKEN=$(curl -sS -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"admin@acme.com\",\"tenantId\":\"$TENANT_ID\",\"role\":\"admin\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)[\"token\"])")
+AUTH=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json")
+
+# seed versions for diff + rollback
+for n in 1 2 3; do
+  enabled=true; action="require_approval"; [[ "$n" == "2" ]] && enabled=false && action="archive"
+  curl -sS -X POST "$BASE_URL/api/governance/policies" "${AUTH[@]}" \
+    -d "{\"id\":\"$POLICY_ID\",\"name\":\"Smoke v$n\",\"enabled\":$enabled,\"when\":\"riskScore > 0.$n\",\"action\":\"$action\",\"changeReason\":\"seed v$n\"}" >/dev/null
+done
+
+echo "bulk-upsert =>" $(curl -sS -o /tmp/gov_bulk.json -w "%{http_code}" -X POST "$BASE_URL/api/governance/policies/bulk-upsert" "${AUTH[@]}" \
+  -d "{\"policies\":[{\"id\":\"policy-bulk-qa\",\"name\":\"Bulk QA\",\"enabled\":true,\"when\":\"riskScore >= 0.7\",\"action\":\"require_approval\"},{\"id\":\"policy-bulk-qb\",\"name\":\"Bulk QB\",\"enabled\":false,\"when\":\"eventAgeDays > 365\",\"action\":\"archive\"}]}" )
+
+echo "diff =>" $(curl -sS -o /tmp/gov_diff.json -w "%{http_code}" "$BASE_URL/api/governance/policies/$POLICY_ID/diff?fromVersion=1&toVersion=3" -H "Authorization: Bearer $TOKEN")
+
+echo "rollback =>" $(curl -sS -o /tmp/gov_rb.json -w "%{http_code}" -X POST "$BASE_URL/api/governance/policies/$POLICY_ID/rollback" "${AUTH[@]}" -d "{\"versionNo\":1}")
+
+echo "simulate =>" $(curl -sS -o /tmp/gov_sim.json -w "%{http_code}" -X POST "$BASE_URL/api/governance/policies/simulate" "${AUTH[@]}" \
+  -d "{\"when\":\"riskScore >= 0.7 && region == \\\"US\\\"\",\"action\":\"require_approval\",\"context\":{\"riskScore\":0.81,\"region\":\"US\"}}")
+
+echo "✅ Expected HTTP status: bulk-upsert=201, diff=200, rollback=201, simulate=200"
+'
+```
+
 ## Kubernetes
 
 Base manifests are in `deploy/k8s`:
