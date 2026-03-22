@@ -3,6 +3,11 @@ import { z } from "zod";
 import { addAuditEntry, getTenantState } from "../store.js";
 import { authorize } from "../middleware/context.js";
 import { markAgentTaskApproved } from "../repositories/agentRepository.js";
+import {
+  approveGovernanceRequest,
+  listGovernanceApprovals,
+  listGovernanceAuditLogs
+} from "../repositories/governanceRepository.js";
 
 const policySchema = z.object({
   id: z.string().min(3),
@@ -42,36 +47,33 @@ governanceRouter.post("/policies", authorize("write:workflows"), (req, res) => {
   res.status(201).json({ data: parsed.data });
 });
 
-governanceRouter.get("/audit", authorize("read:governance"), (req, res) => {
-  const tenant = getTenantState(req.ctx.tenantId);
-  res.json({ data: tenant.governance.auditLog.slice(0, 200) });
+governanceRouter.get("/audit", authorize("read:governance"), async (req, res, next) => {
+  try {
+    const logs = await listGovernanceAuditLogs(req.ctx.tenantId, 200);
+    res.json({ data: logs });
+  } catch (error) {
+    next(error);
+  }
 });
 
-governanceRouter.get("/approvals", authorize("read:governance"), (req, res) => {
-  const tenant = getTenantState(req.ctx.tenantId);
-  res.json({ data: tenant.governance.approvals });
+governanceRouter.get("/approvals", authorize("read:governance"), async (req, res, next) => {
+  try {
+    const approvals = await listGovernanceApprovals(req.ctx.tenantId);
+    res.json({ data: approvals });
+  } catch (error) {
+    next(error);
+  }
 });
 
 governanceRouter.post("/approvals/:id/approve", authorize("approve:governance"), async (req, res, next) => {
-  const tenant = getTenantState(req.ctx.tenantId);
-  const approval = tenant.governance.approvals.find((item) => item.id === req.params.id);
-  if (!approval) {
-    return res.status(404).json({ error: "Approval request not found" });
-  }
-  approval.status = "approved";
-  approval.approvedAt = new Date().toISOString();
-  approval.approvedBy = req.ctx.userId;
-
-  const task = tenant.agents.tasks.find((item) => item.id === approval.taskId);
-  const approvedOutcome = `Approved execution: ${task?.objective || "task"}`;
-
   try {
-    await markAgentTaskApproved(req.ctx.tenantId, approval.taskId, approvedOutcome);
-
-    if (task && task.status === "pending_approval") {
-      task.status = "completed";
-      task.outcome = approvedOutcome;
+    const approval = await approveGovernanceRequest(req.ctx.tenantId, req.params.id, req.ctx.userId);
+    if (!approval) {
+      return res.status(404).json({ error: "Approval request not found" });
     }
+
+    const approvedOutcome = "Approved execution by governance reviewer";
+    await markAgentTaskApproved(req.ctx.tenantId, approval.taskId, approvedOutcome);
 
     addAuditEntry(req.ctx.tenantId, {
       actorId: req.ctx.userId,

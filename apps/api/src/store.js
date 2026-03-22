@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { getPgPool } from "./lib/postgres.js";
 
 const now = () => new Date().toISOString();
 
@@ -75,7 +76,7 @@ export function listTenantMetadata() {
 
 export function addAuditEntry(tenantId, { actorId, actorRole, action, module, resourceId, payload }) {
   const tenant = getTenantState(tenantId);
-  tenant.governance.auditLog.unshift({
+  const entry = {
     id: uuidv4(),
     at: now(),
     actorId,
@@ -84,7 +85,24 @@ export function addAuditEntry(tenantId, { actorId, actorRole, action, module, re
     module,
     resourceId,
     payload
-  });
+  };
+
+  tenant.governance.auditLog.unshift(entry);
+
+  const pool = getPgPool();
+  if (pool) {
+    void pool
+      .query(
+        `INSERT INTO governance_audit_logs
+           (id, tenant_id, at, actor_id, actor_role, action, module, resource_id, payload)
+         VALUES
+           ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+        [entry.id, tenantId, entry.at, entry.actorId, entry.actorRole, entry.action, entry.module, entry.resourceId || null, JSON.stringify(entry.payload || {})]
+      )
+      .catch((error) => {
+        console.error("[audit-persist]", error.message);
+      });
+  }
 }
 
 export function listTenants() {

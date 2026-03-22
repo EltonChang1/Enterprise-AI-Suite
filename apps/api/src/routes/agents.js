@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
-import { addAuditEntry, getTenantState } from "../store.js";
+import { addAuditEntry } from "../store.js";
 import { authorize } from "../middleware/context.js";
 import { enqueueJob } from "../lib/queue.js";
 import { createAgentTask, listAgentTasks } from "../repositories/agentRepository.js";
 import { createBillingUsageEvent } from "../repositories/billingRepository.js";
+import { createGovernanceApproval } from "../repositories/governanceRepository.js";
 
 const taskSchema = z.object({
   objective: z.string().min(4),
@@ -30,7 +31,6 @@ agentsRouter.post("/tasks", authorize("write:agents"), async (req, res, next) =>
     return res.status(400).json({ error: "Invalid task payload" });
   }
 
-  const tenant = getTenantState(req.ctx.tenantId);
   const requiresApproval = parsed.data.riskScore >= 0.7;
   const task = {
     id: uuidv4(),
@@ -41,18 +41,18 @@ agentsRouter.post("/tasks", authorize("write:agents"), async (req, res, next) =>
     createdAt: new Date().toISOString()
   };
 
-  if (requiresApproval) {
-    tenant.governance.approvals.unshift({
-      id: uuidv4(),
-      taskId: task.id,
-      type: "agent-task",
-      status: "pending",
-      requestedAt: new Date().toISOString(),
-      requestedBy: req.ctx.userId
-    });
-  }
-
   try {
+    if (requiresApproval) {
+      await createGovernanceApproval(req.ctx.tenantId, {
+        id: uuidv4(),
+        taskId: task.id,
+        type: "agent-task",
+        status: "pending",
+        requestedAt: new Date().toISOString(),
+        requestedBy: req.ctx.userId
+      });
+    }
+
     await createAgentTask(req.ctx.tenantId, task);
 
     await enqueueJob("agent-task", {
