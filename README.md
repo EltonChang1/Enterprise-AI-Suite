@@ -79,7 +79,11 @@ Send headers with each request:
 - `POST /api/billing/checkout`
 - `POST /api/billing/webhook`
 - `GET/POST /api/governance/policies`
+- `POST /api/governance/policies/bulk-upsert`
 - `GET /api/governance/policies/:id/versions` - with pagination & filtering
+- `POST /api/governance/policies/:id/rollback`
+- `GET /api/governance/policies/:id/diff`
+- `POST /api/governance/policies/simulate`
 - `GET /api/governance/audit`
 - `POST /api/governance/approvals/:id/approve`
 
@@ -195,6 +199,173 @@ GET /api/governance/policies/policy-retention/versions?limit=25&offset=0&changed
 - Both DB and in-memory fallback support all filters
 - Invalid dates return 400 error with descriptive message
 - Date parameters must be in ISO 8601 format
+
+### Bulk Policy Upsert Endpoint
+
+The `POST /api/governance/policies/bulk-upsert` endpoint upserts multiple policies in one request and returns per-item results.
+
+**Request Body:**
+
+```json
+{
+  "policies": [
+    {
+      "id": "policy-a",
+      "name": "Policy A",
+      "enabled": true,
+      "when": "riskScore > 0.7",
+      "action": "require_approval",
+      "changeReason": "bulk import"
+    },
+    {
+      "id": "policy-b",
+      "name": "Policy B",
+      "enabled": false,
+      "when": "eventAgeDays > 365",
+      "action": "archive"
+    }
+  ]
+}
+```
+
+**Curl Example:**
+
+```bash
+curl -X POST "http://localhost:4100/api/governance/policies/bulk-upsert" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "policies": [
+      {"id":"policy-a","name":"Policy A","enabled":true,"when":"riskScore > 0.7","action":"require_approval","changeReason":"bulk import"},
+      {"id":"policy-b","name":"Policy B","enabled":false,"when":"eventAgeDays > 365","action":"archive"}
+    ]
+  }'
+```
+
+**Response Shape:**
+
+```json
+{
+  "data": {
+    "total": 2,
+    "successCount": 2,
+    "failedCount": 0,
+    "results": [
+      { "policyId": "policy-a", "status": "success" },
+      { "policyId": "policy-b", "status": "success" }
+    ]
+  }
+}
+```
+
+### Policy Rollback Endpoint
+
+The `POST /api/governance/policies/:id/rollback` endpoint creates a new policy version by restoring fields from a previous version.
+
+**Request Body:**
+
+```json
+{
+  "versionNo": 1
+}
+```
+
+**Curl Example:**
+
+```bash
+curl -X POST "http://localhost:4100/api/governance/policies/policy-a/rollback" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"versionNo":1}'
+```
+
+**Response Shape:**
+
+```json
+{
+  "data": {
+    "policyId": "policy-a",
+    "rolledBackTo": 1
+  }
+}
+```
+
+### Policy Version Diff Endpoint
+
+The `GET /api/governance/policies/:id/diff` endpoint compares two versions and returns changed fields with a summary.
+
+**Query Parameters:**
+
+- `fromVersion` (required, positive integer)
+- `toVersion` (required, positive integer)
+
+**Curl Example:**
+
+```bash
+curl "http://localhost:4100/api/governance/policies/policy-a/diff?fromVersion=1&toVersion=3" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response Shape:**
+
+```json
+{
+  "data": {
+    "policyId": "policy-a",
+    "fromVersion": 1,
+    "toVersion": 3,
+    "changes": {
+      "enabled": { "before": true, "after": false, "changed": true }
+    },
+    "hasChanges": true,
+    "summary": "Policy disabled"
+  }
+}
+```
+
+### Policy Simulation Endpoint
+
+The `POST /api/governance/policies/simulate` endpoint evaluates a policy condition against a provided context payload.
+
+**Request Body:**
+
+```json
+{
+  "when": "riskScore >= 0.7 && region == \"US\"",
+  "action": "require_approval",
+  "context": {
+    "riskScore": 0.81,
+    "region": "US"
+  }
+}
+```
+
+**Curl Example:**
+
+```bash
+curl -X POST "http://localhost:4100/api/governance/policies/simulate" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "when":"riskScore >= 0.7 && region == \"US\"",
+    "action":"require_approval",
+    "context":{"riskScore":0.81,"region":"US"}
+  }'
+```
+
+**Response Shape:**
+
+```json
+{
+  "data": {
+    "when": "riskScore >= 0.7 && region == \"US\"",
+    "context": { "riskScore": 0.81, "region": "US" },
+    "matched": true,
+    "action": "require_approval",
+    "simulatedAt": "2026-03-22T12:00:00.000Z"
+  }
+}
+```
 
 ## Kubernetes
 
